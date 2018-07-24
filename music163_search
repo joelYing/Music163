@@ -1,0 +1,178 @@
+#!/usr/bin/python
+# -*- coding:utf-8 -*-
+# author:joel 18-7-7
+
+#爬取定向歌曲的评论，需要在网页版网易云获取改革取得id，输入后即可爬取
+
+import base64
+import pymongo
+import random
+import re
+import sys
+import time
+import requests
+from Crypto.Cipher import AES
+
+headers = {
+    'User-Agent':'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36'
+}
+
+baseUrl = 'https://music.163.com'
+# offset的取值为:(评论页数-1)*20,total第一页为true，其余页为false
+# first_param = '{rid:"", offset:"0", total:"true", limit:"20", csrf_token:""}' # 第一个参数
+# 第二个参数
+second_param = "010001"
+# 第三个参数
+third_param = "00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7"
+# 第四个参数
+forth_param = "0CoJUm6Qyw8W8jud"
+
+def getHtml(url):
+    r = requests.get(url, headers=headers)
+    html = r.text
+    return html
+
+# 获取参数
+def get_params(page): # page为传入页数
+    iv = "0102030405060708"
+    first_key = forth_param
+    second_key = 16 * 'F'
+    if(page == 1): # 如果为第一页
+        first_param = '{rid:"", offset:"0", total:"true", limit:"20", csrf_token:""}'
+        h_encText = AES_encrypt(first_param, first_key, iv)
+    else:
+        offset = str((page-1)*20)
+        first_param = '{rid:"", offset:"%s", total:"%s", limit:"20", csrf_token:""}' %(offset,'false')
+        h_encText = AES_encrypt(first_param, first_key, iv)
+    h_encText = AES_encrypt(h_encText, second_key, iv)
+    return h_encText
+
+# 获取 encSecKey
+def get_encSecKey():
+    encSecKey = "257348aecb5e556c066de214e531faadd1c55d814f9be95fd06d6bff9f4c7a41f831f6394d5a3fd2e3881736d94a02ca919d952872e7d0a50ebfa1769a7a62d512f5f1ca21aec60bc3819a9c3ffca5eca9a0dba6d6f7249b06f5965ecfff3695b54e1c28f3f624750ed39e7de08fc8493242e26dbc4484a01c76f739e135637c"
+    return encSecKey
+
+# 加密过程
+def AES_encrypt(text, key, iv):
+    pad = 16 - len(text) % 16
+    text = text + pad * chr(pad)
+    encryptor = AES.new(key, AES.MODE_CBC, iv)
+    encrypt_text = encryptor.encrypt(text)
+    encrypt_text = base64.b64encode(encrypt_text)
+    return encrypt_text
+
+#获取post得到的Json
+def getPostApi(j ,postUrl, headers1):
+    param = {
+        # 获取对应页数的params
+        'params': get_params(j),
+        'encSecKey': get_encSecKey()
+    }
+    r = requests.post(postUrl, data=param, headers=headers1)
+    return r
+
+#获取歌曲评论
+def getMusicComments(comment_TatalPage ,postUrl, headers1):
+    commentinfo = []
+    hotcommentinfo = []
+    topcommentinfo = []
+    # 对每一页评论
+    for j in range(1, comment_TatalPage + 1):
+        # 热评只在第一页可抓取
+        if j == 1:
+            r = getPostApi(j , postUrl, headers1)
+            comment_info = r.json()['comments']
+            for i in comment_info:
+                com_info = {}
+                com_info['content'] = i['content']
+                com_info['author'] = i['user']['nickname']
+                com_info['likedCount'] = i['likedCount']
+                print com_info['content']
+                commentinfo.append(com_info)
+            hotcomment_info = r.json()['hotComments']
+            for i in hotcomment_info:
+                hot_info = {}
+                hot_info['content'] = i['content']
+                hot_info['author'] = i['user']['nickname']
+                hot_info['likedCount'] = i['likedCount']
+                print hot_info['content']
+                hotcommentinfo.append(hot_info)
+            #可能还有个音乐人置顶的评论
+            if r.json()['topComments'] :
+                topcomment_info = r.json()['topComments']
+                for i in topcomment_info:
+                    top_info = {}
+                    top_info['content'] = i['content']
+                    top_info['author'] = i['user']['nickname']
+                    print top_info['content']
+                    topcommentinfo.append(top_info)
+
+        else:
+            r = getPostApi(j, postUrl, headers1)
+            comment_info = r.json()['comments']
+            for i in comment_info:
+                com_info = {}
+                com_info['content'] = i['content']
+                com_info['author'] = i['user']['nickname']
+                com_info['likedCount'] = i['likedCount']
+                print com_info['content']
+                commentinfo.append(com_info)
+        print u'第'+str(j)+u'页爬取完毕...'
+        time.sleep(random.randint(1,10))
+    # print commentinfo
+    print '\n-----------------------------------------------------------\n'
+    # print hotcommentinfo
+    return commentinfo,hotcommentinfo
+
+def saveToMongoDB(musicName,comment_data,hotComment_data):
+    client = pymongo.MongoClient(host='localhost',port=27017)
+    db = client['Music163']
+    test = db[musicName]
+    test.insert(hotComment_data)
+    test.insert(comment_data)
+    print musicName+u'已存入数据库...'
+
+def getSongId():
+    #获取每个歌单里的每首歌的id，作为接下来post获取的关键
+    music_id = raw_input("Please input the id of the song : ")
+    data = {}
+    headers1 = {
+        'Referer': 'https://music.163.com/song?id={}'.format(music_id),
+        'User-Agent': 'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36'
+    }
+    musicUrl = baseUrl+'/song?id='+music_id
+    print musicUrl
+    songHtml = getHtml(musicUrl)
+    result = re.findall(r'<title>(.*?)</title>',songHtml,re.S)
+    #为何是-27   ：  这里有 \u2345 的时候，把 \，u，2345，分别看成一位，即一个中文字看成3位
+    musicName = result[0].encode('utf-8')[:-27]
+    print musicName
+    data['musicUrl'] = musicUrl
+    postUrl = 'https://music.163.com/weapi/v1/resource/comments/R_SO_4_{}?csrf_token='.format(music_id)
+    param = {
+        'params': get_params(1),
+        'encSecKey': get_encSecKey()
+    }
+    r = requests.post(postUrl,data = param,headers = headers1)
+    total = r.json()
+    # 总评论数
+    total = int(total['total'])
+    comment_TatalPage = total/20
+    # 基础总页数
+    print comment_TatalPage
+    #判断评论页数，有余数则为多一页，整除则正好
+    if total%20 != 0:
+        comment_TatalPage = comment_TatalPage+1
+        comment_data,hotComment_data = getMusicComments(comment_TatalPage, postUrl, headers1)
+        #存入数据库的时候若出现ID重复，那么注意爬下来的数据是否只有一个
+        saveToMongoDB(musicName,comment_data,hotComment_data)
+        print 'End!'
+    else:
+        comment_data, hotComment_data = getMusicComments(comment_TatalPage, postUrl, headers1)
+        saveToMongoDB(musicName,comment_data,hotComment_data)
+        print 'End!'
+
+    time.sleep(random.randint(1, 10))
+
+if __name__ == '__main__':
+    getSongId()
