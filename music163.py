@@ -21,7 +21,7 @@ https://music.163.com/#/discover/playlist/?order=new&cat=%E5%85%A8%E9%83%A8&limi
 '''
 
 headers = {
-    'User-Agent':'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36'
+    'User-Agent':'your-user-agent'
 }
 
 baseUrl = 'https://music.163.com'
@@ -144,7 +144,7 @@ def getMusicComments(comment_TatalPage ,postUrl, headers1):
     return commentinfo,hotcommentinfo
 
 def saveToMongoDB(musicName,comment_data,hotComment_data):
-    client = pymongo.MongoClient(host='localhost',port=27017)
+    client = pymongo.MongoClient(host='localhost',port=port)
     db = client['Music163']
     test = db[musicName]
     test.insert(hotComment_data)
@@ -161,7 +161,7 @@ def getSongSheet(url):
         data = {}
         headers1 = {
             'Referer': 'https://music.163.com/song?id={}'.format(i[0]),
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.3; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36'
+            'User-Agent': 'your-user-agent'
         }
         musicUrl = baseUrl+'/song?id='+i[0]
         print musicUrl
